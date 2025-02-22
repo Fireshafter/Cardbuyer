@@ -1,5 +1,7 @@
 const { app, BrowserWindow } = require("electron");
 const puppeteer = require("puppeteer");
+const mapArticleRow = require("./scripts/mapArticleRow");
+const fs = require("fs");
 
 const createWindow = () => {
   const win = new BrowserWindow({
@@ -45,16 +47,23 @@ const buscarInfo = async (query, filter) => {
   await page.locator("a ::-p-text(Mostrar ofertas)").click();
   await page.waitForNetworkIdle({ idleTime: 1000 });
 
-  let more = await page.$eval("#loadMoreButton", () => true).catch(() => false);
+  let pages = 0;
 
-  while (more) {
-    try {
-      await page.click("#loadMoreButton");
-      await page.waitForNetworkIdle({ idleTime: 1000 });
-    } catch (error) {
-      more = false;
-    }
+  while (
+    (await page.$eval(
+      "#loadMoreButton",
+      (el) => el.getAttribute("disabled") === null
+    )) &&
+    pages < 5
+  ) {
+    pages++;
+    await page.click("#loadMoreButton");
+    await page.waitForNetworkIdle({ idleTime: 1000 });
   }
+
+  const filas = await page.$$eval(".article-row", mapArticleRow);
+
+  console.log(filas);
 };
 
 app.whenReady().then(() => {
