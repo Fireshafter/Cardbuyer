@@ -63,11 +63,11 @@ const buscarInfo = async (query, filter) => {
 
   const filas = await page.$$eval(".article-row", mapArticleRow);
 
-  console.log(filas);
+  fs.writeFileSync("output.json", JSON.stringify(filas), "UTF-8");
 };
 
 app.whenReady().then(() => {
   createWindow();
 
-  buscarInfo("Bibarel BRS 121", { lang: 4 });
+  buscarInfo("Relicanth TEF 84", { lang: 4 });
 });
