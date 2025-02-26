@@ -1,7 +1,8 @@
 const { app, BrowserWindow } = require("electron");
 const puppeteer = require("puppeteer");
-const mapArticleRow = require("./scripts/mapArticleRow");
+const mapArticleRow = require("./scripts/mapArticleRow.js");
 const fs = require("fs");
+const browserDo = require("./scripts/browserDo.js");
 
 const createWindow = () => {
   const win = new BrowserWindow({
@@ -14,86 +15,126 @@ const createWindow = () => {
 };
 
 const buscarInfo = async (query, filter) => {
-  const timeout = 1000
-
+  // Inicializamos el navegador y accedemos a cardmarket
   const browser = await puppeteer.launch({
     headless: false,
   });
   const page = await browser.newPage();
-  await page.goto("https://www.cardmarket.com/es/Pokemon", {
+  const response = await page.goto("https://www.cardmarket.com/es/Pokemon", {
     waitUntil: "networkidle0",
   });
-
-  // Set screen size
   await page.setViewport({ width: 1080, height: 1024 });
 
-  // Type into search box
-  await page.type("#ProductSearchInput", query);
-  await page.waitForNetworkIdle({ idleTime: timeout});
+  if (response.status === 429)
+    throw new Error("Página bloqueada por too many request");
 
-  await page.click("#AutoCompleteResult > a");
+  // Busca el nombre del producto en la barra de búsqueda
+  await browserDo(async (time) => {
+    await page.waitForNetworkIdle({ idleTime: time });
+    await page.type("#ProductSearchInput", query);
+  }, `buscar ${query} en la barra de busqueda`);
+
+  // Clicamos el primer resultado
+  await browserDo(async (time) => {
+    await page.waitForNetworkIdle({ idleTime: time });
+    await page.click("#AutoCompleteResult > a");
+  }, `clicar ${query} en los resultados`);
 
   if (filter.lang) {
-    await page.click("a[href='#articleFilterProductLanguage']");
-    await page.waitForNetworkIdle({ idleTime: timeout});
+    // Abrimos los filtros
+    await browserDo(async (time) => {
+      await page.waitForNetworkIdle({ idleTime: time });
+      await page.click("a[href='#articleFilterProductLanguage']");
+    }, `abrir los filtros para ${query}`);
 
-    await page.click(
-      "#articleFilterProductLanguage .filter-box input[name='language[4]']"
-    );
-    await page.waitForNetworkIdle({ idleTime: timeout});
+    // Clicamos los idiomas que queramos filtrar (actualmente hardcoded español)
+    await browserDo(async (time) => {
+      await page.waitForNetworkIdle({ idleTime: time });
+      await page.click(
+        "#articleFilterProductLanguage .filter-box input[name='language[4]']"
+      );
+    }, `seleccionar los idiomas para ${query}`);
 
-    await page.click("input[title='Filtrar']");
-    await page.waitForNetworkIdle({ idleTime: timeout});
+    // Clicamos al boton de filtrar para aplicar los filtros
+    await browserDo(async (time) => {
+      await page.waitForNetworkIdle({ idleTime: time });
+      await page.click("input[title='Filtrar']");
+    }, `aplicar los filtros para ${query}`);
   }
 
-  await page.locator("a ::-p-text(Mostrar ofertas)").click();
-  await page.waitForNetworkIdle({ idleTime: timeout});
+  // Mostramos todas las ofertas
+  await browserDo(async (time) => {
+    await page.waitForNetworkIdle({ idleTime: time });
+    await page.locator("a ::-p-text(Mostrar ofertas)").click();
+  }, `mostrar todas las ofertas de ${query}`);
 
   let pages = 0;
 
-  while (
-    (await page.$eval(
-      "#loadMoreButton",
-      (el) => el.getAttribute("disabled") === null
-    )) &&
-    pages < 5
-  ) {
+  let more = await browserDo(async (time) => {
+    await page.waitForNetworkIdle({ idleTime: time });
+    return Boolean(await page.$("#loadMoreButton"));
+  }, `buscar el botón de buscar más en los resultados de ${query}`);
+
+  while (more && pages < 5) {
     pages++;
-    await page.click("#loadMoreButton");
-    await page.waitForNetworkIdle({ idleTime: timeout});
+
+    await browserDo(async (time) => {
+      await page.waitForNetworkIdle({ idleTime: time });
+      await page.click("#loadMoreButton");
+    }, `clicar el botón de mas resultados en ${query}`);
+
+    more = await browserDo(async (time) => {
+      await page.waitForNetworkIdle({ idleTime: time });
+      return Boolean(
+        await page.$eval(
+          "#loadMoreButton",
+          (el) => el.getAttribute("disabled") === null
+        )
+      );
+    }, `comprobar que el botón buscar mas de ${query} sigue activo`);
   }
 
-  const filas = await page.$$eval(".article-row", mapArticleRow);
+  const filas = await browserDo(async (time) => {
+    await page.waitForNetworkIdle({ idleTime: time });
+    return await page.$$eval(".article-row", mapArticleRow);
+  }, `recibir los datos resultantes de la búsqueda de ${query}`);
 
-  browser.close()
-  return filas
+  console.log(`\nSe han recibido ${filas.length} filas para ${query}\n\n`);
+
+  browser.close();
+  return filas;
 };
 
 app.whenReady().then(async () => {
   createWindow();
-  const input = fs.readFileSync('input.txt', 'utf-8')
-  const cards = input.split(/\n/).map(x => {
-    const card = x.match(/([0-9])\s(.+)\s(.+)\s([0-9]+)/m)
+  const input = fs.readFileSync("input.txt", "utf-8");
+  const cards = input
+    .split(/\n/)
+    .map((x) => {
+      const card = x.match(/([0-9])\s(.+)\s(.+)\s([0-9]+)/m);
 
-    if(card)
-    return {
-      fullname: `${card[2]} ${card[3]} ${card[4]}`,
-      name: card[2],
-      set: card[3],
-      setcode: Number(card[4]),
-      quantity: Number(card[1])
-    }
-  }).filter(x=>x)
-
-  let results = []
+      if (card)
+        return {
+          fullname: `${card[2]} ${card[3]} ${card[4]}`,
+          name: card[2],
+          set: card[3],
+          setcode: Number(card[4]),
+          quantity: Number(card[1]),
+        };
+    })
+    .filter((x) => x);
 
   for (const index in cards) {
-    const card = cards[index]
-    console.log(`Buscando información de ${card.fullname}...`)
-    const cardOffers = await buscarInfo(card.fullname, {lang:4})
-    results.push(cardOffers)
+    const card = cards[index];
+    console.log(`Buscando información de ${card.fullname}...`);
+    const cardOffers = await browserDo(
+      async () => await buscarInfo(card.fullname, { lang: 4 }),
+      `buscando información de ${card.fullname}`
+    );
+
+    cards[index].offers = cardOffers;
   }
-  
+
   //buscarInfo("Relicanth TEF 84", { lang: 4 });
-  fs.writeFileSync("output.json", JSON.stringify({results, cards}), "UTF-8");
+  fs.writeFileSync("output.json", JSON.stringify(cards), "UTF-8");
 });
