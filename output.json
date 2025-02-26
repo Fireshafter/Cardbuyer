@@ -11770,14 +11770,6 @@
     ]
   },
   {
-    "fullname": "Switch SVI 194",
-    "name": "Switch",
-    "set": "SVI",
-    "setcode": 194,
-    "quantity": 3,
-    "offers": []
-  },
-  {
     "fullname": "Mirage Gate LOR 163",
     "name": "Mirage Gate",
     "set": "LOR",
