@@ -1,6 +1,5 @@
-const browserDo = async (func, desc, maxTries = 5) => {
+const browserDo = async (func, desc, timeout = 1000, maxTries = 5) => {
   // Aqui definimos el timeout base y incializamos el numero de intentos
-  const timeout = 1000;
   let tries = 0;
 
   // Se intenta cada callback un máximo de 5 veces incrementando el tiempo de espera entre ellos

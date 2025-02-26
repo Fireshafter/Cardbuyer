@@ -3,6 +3,8 @@ const puppeteer = require("puppeteer");
 const mapArticleRow = require("./scripts/mapArticleRow.js");
 const fs = require("fs");
 const browserDo = require("./scripts/browserDo.js");
+const delay = require("./scripts/delay.js");
+const scrap = require("./scripts/scrap.js");
 
 const createWindow = () => {
   const win = new BrowserWindow({
@@ -14,19 +16,25 @@ const createWindow = () => {
   win.loadFile("src/views/index.html");
 };
 
-const buscarInfo = async (query, filter) => {
+const buscarInfo = async (query, filter, error) => {
   // Inicializamos el navegador y accedemos a cardmarket
   const browser = await puppeteer.launch({
     headless: false,
   });
   const page = await browser.newPage();
-  const response = await page.goto("https://www.cardmarket.com/es/Pokemon", {
+
+  page.on("response", async (response) => {
+    if (response.status() === 429) {
+      console.warn("⚠️ Detectado HTTP 429. Recargando la página...");
+      await browser.close();
+      return error();
+    }
+  });
+
+  await page.goto("https://www.cardmarket.com/es/Pokemon", {
     waitUntil: "networkidle0",
   });
   await page.setViewport({ width: 1080, height: 1024 });
-
-  if (response.status === 429)
-    throw new Error("Página bloqueada por too many request");
 
   // Busca el nombre del producto en la barra de búsqueda
   await browserDo(async (time) => {
@@ -35,10 +43,14 @@ const buscarInfo = async (query, filter) => {
   }, `buscar ${query} en la barra de busqueda`);
 
   // Clicamos el primer resultado
-  await browserDo(async (time) => {
-    await page.waitForNetworkIdle({ idleTime: time });
-    await page.click("#AutoCompleteResult > a");
-  }, `clicar ${query} en los resultados`);
+  await browserDo(
+    async (time) => {
+      await page.waitForNetworkIdle({ idleTime: time });
+      await page.click("#AutoCompleteResult > a");
+    },
+    `clicar ${query} en los resultados`,
+    750
+  );
 
   if (filter.lang) {
     // Abrimos los filtros
@@ -48,12 +60,16 @@ const buscarInfo = async (query, filter) => {
     }, `abrir los filtros para ${query}`);
 
     // Clicamos los idiomas que queramos filtrar (actualmente hardcoded español)
-    await browserDo(async (time) => {
-      await page.waitForNetworkIdle({ idleTime: time });
-      await page.click(
-        "#articleFilterProductLanguage .filter-box input[name='language[4]']"
-      );
-    }, `seleccionar los idiomas para ${query}`);
+    await browserDo(
+      async (time) => {
+        await page.waitForNetworkIdle({ idleTime: time });
+        await page.click(
+          "#articleFilterProductLanguage .filter-box input[name='language[4]']"
+        );
+      },
+      `seleccionar los idiomas para ${query}`,
+      750
+    );
 
     // Clicamos al boton de filtrar para aplicar los filtros
     await browserDo(async (time) => {
@@ -70,10 +86,14 @@ const buscarInfo = async (query, filter) => {
 
   let pages = 0;
 
-  let more = await browserDo(async (time) => {
-    await page.waitForNetworkIdle({ idleTime: time });
-    return Boolean(await page.$("#loadMoreButton"));
-  }, `buscar el botón de buscar más en los resultados de ${query}`);
+  let more = await browserDo(
+    async (time) => {
+      await page.waitForNetworkIdle({ idleTime: time });
+      return Boolean(await page.$("#loadMoreButton"));
+    },
+    `buscar el botón de buscar más en los resultados de ${query}`,
+    750
+  );
 
   while (more && pages < 5) {
     pages++;
@@ -127,10 +147,11 @@ app.whenReady().then(async () => {
   for (const index in cards) {
     const card = cards[index];
     console.log(`Buscando información de ${card.fullname}...`);
-    const cardOffers = await browserDo(
-      async () => await buscarInfo(card.fullname, { lang: 4 }),
-      `buscando información de ${card.fullname}`
-    );
+    const cardOffers = await scrap(async () => {
+      return await buscarInfo(card.fullname, { lang: 4 }, () => {
+        throw new Error("Fuimos bloquiados");
+      });
+    });
 
     cards[index].offers = cardOffers;
   }
